@@ -27,6 +27,7 @@ const I = {
   orders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0"/></svg>',
   chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
 }
 
@@ -73,7 +74,7 @@ function renderLogin() {
 }
 
 /* ---------- каркас ---------- */
-const NAV = [['dashboard', 'Сводка', I.dash], ['orders', 'Заказы', I.orders], ['inbox', 'Переписки', I.chat], ['customers', 'Покупатели', I.users], ['settings', 'Настройки', I.gear]]
+const NAV = [['dashboard', 'Сводка', I.dash], ['orders', 'Заказы', I.orders], ['inbox', 'Переписки', I.chat], ['customers', 'Покупатели', I.users], ['promos', 'Промокоды', I.tag], ['settings', 'Настройки', I.gear]]
 function renderShell() {
   const opts = `<option value="0">Все марки</option>` + S.brands.map((b) => `<option value="${b.id}" ${b.id === S.brand ? 'selected' : ''}>${esc(b.name)}</option>`).join('')
   $('#app').innerHTML = `<div class="layout">
@@ -101,12 +102,13 @@ const refreshCounters = guard(async () => { S.counters = await api('GET', '/coun
 
 /* ---------- маршруты ---------- */
 function route() {
+  if (S.curHash !== location.hash) { S.prevHash = S.curHash || ''; S.curHash = location.hash }
   const [, name = 'dashboard', id] = location.hash.split('/')
   $$('.nav a, .mnav a').forEach((a) => a.classList.toggle('on', a.dataset.k === name))
   S.view?.destroy?.()
   S.view = null
   const v = $('#view')
-  const views = { dashboard: viewDashboard, orders: viewOrders, inbox: viewInbox, customers: viewCustomers, settings: viewSettings }
+  const views = { dashboard: viewDashboard, orders: viewOrders, inbox: viewInbox, customers: viewCustomers, promos: viewPromos, settings: viewSettings }
   S.view = (views[name] || viewDashboard)(v, id) || null
 }
 addEventListener('hashchange', route)
@@ -142,7 +144,7 @@ function viewDashboard(v) {
       <div class="card" style="margin-top:14px">
         <div class="head" style="margin-bottom:6px"><h2 style="margin:0">По дням</h2><div class="grow"></div>
           <div class="legend"><span><i style="background:var(--accent)"></i>Выручка</span><span><i style="background:#22c55e"></i>Посетители</span></div></div>
-        ${chart(a.series)}
+        <div id="chartBox" class="chart-box"></div>
       </div>
       ${a.brands.length > 1 ? `<div class="card" style="margin-top:14px"><h2>По маркам</h2><div class="table-wrap" style="border:0"><table>
         <thead><tr><th>Марка</th><th class="right">Выручка</th><th class="right">Заказы</th><th class="right">Посетители</th><th class="right">Конверсия</th></tr></thead>
@@ -165,13 +167,20 @@ function viewDashboard(v) {
         ${a.devices.length ? `<p class="muted small" style="margin:12px 0 0">Устройства: ${a.devices.map((d) => `${esc(d.device)} — ${num(d.n)}`).join(', ')}</p>` : ''}</div>
       </div>`
     $('#days', v).onclick = (e) => { const d = e.target.dataset.d; if (d) { days = Number(d); localStorage.setItem('crm-days', days); draw() } }
+    series = a.series
+    paintChart()
   })
+  // график рисуем ровно по ширине блока, чтобы подписи не растягивались
+  let series = null, lastW = 0
+  const paintChart = () => { const box = $('#chartBox', v); if (!box || !series) return; lastW = box.clientWidth; box.innerHTML = chart(series, lastW) }
+  const ro = new ResizeObserver(() => { const box = $('#chartBox', v); if (box && Math.abs(box.clientWidth - lastW) > 4) paintChart() })
+  ro.observe(v)
   draw()
-  return { onEvent: (e) => { if (e.type === 'order') draw() } }
+  return { onEvent: (e) => { if (e.type === 'order') draw() }, destroy: () => ro.disconnect() }
 }
 
-function chart(series) {
-  const W = 900, H = 220, P = { l: 52, r: 44, t: 10, b: 24 }
+function chart(series, width) {
+  const W = Math.max(280, Math.round(width || 600)), H = W < 500 ? 180 : 220, P = { l: 44, r: 36, t: 10, b: 24 }
   const n = series.length
   const maxR = Math.max(1, ...series.map((s) => s.revenue))
   const maxV = Math.max(1, ...series.map((s) => s.visitors))
@@ -182,40 +191,130 @@ function chart(series) {
     return `<rect x="${P.l + i * bw + bw * 0.15}" y="${y(s.revenue, maxR)}" width="${Math.max(1, bw * 0.7)}" height="${h}" rx="2" fill="var(--accent)" opacity=".85"><title>${dd(s.d)}: ${rub(s.revenue)}, заказов ${s.orders}, посетителей ${s.visitors}</title></rect>`
   }).join('')
   const line = series.map((s, i) => `${P.l + i * bw + bw / 2},${y(s.visitors, maxV)}`).join(' ')
-  const step = Math.ceil(n / 10)
+  const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor((W - P.l - P.r) / 64))))
   const labels = series.map((s, i) => (i % step === 0 ? `<text x="${P.l + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${new Date(s.d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</text>` : '')).join('')
   const grid = [0, 0.5, 1].map((f) => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(maxR * f, maxR)}" y2="${y(maxR * f, maxR)}" stroke="#e6e8f0"/>
     <text x="${P.l - 6}" y="${y(maxR * f, maxR) + 4}" text-anchor="end">${maxR * f >= 1000 ? Math.round((maxR * f) / 1000) + 'к' : Math.round(maxR * f)}</text>
     <text x="${W - P.r + 6}" y="${y(maxV * f, maxV) + 4}">${Math.round(maxV * f)}</text>`).join('')
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}${bars}<polyline points="${line}" fill="none" stroke="#22c55e" stroke-width="2"/>${labels}</svg>`
+  return `<svg class="chart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${grid}${bars}<polyline points="${line}" fill="none" stroke="#22c55e" stroke-width="2" stroke-linejoin="round"/>${labels}</svg>`
 }
 
 /* ====================== ЗАКАЗЫ ====================== */
+const KANBAN_LIMIT = 60 // карточек в колонке; остальные — через список
 function viewOrders(v, id) {
   let status = '', qtext = ''
-  const draw = guard(async () => {
-    const rows = await api('GET', `/orders?${brandQ()}&status=${status}&q=${encodeURIComponent(qtext)}`)
-    $('#olist', v).innerHTML = rows.length ? `<div class="table-wrap"><table>
+  let mode = localStorage.getItem('crm-orders-view') === 'kanban' ? 'kanban' : 'list'
+  let rows = []
+  const orderCard = (o) => `<div class="kcard" data-id="${o.id}" data-st="${o.status}">
+      <div class="kc-top"><b>№ ${esc(o.number)}</b>${o.paid ? '<span class="pill st-delivered">оплачен</span>' : ''}<span class="grow"></span><span class="muted small nowrap">${ago(o.created_at)}</span></div>
+      <div class="kc-name">${esc(o.name) || '—'}</div>
+      <div class="kc-bot"><span class="muted small">${num(o.items_count)} шт.${o.promo ? ' · ' + esc(o.promo) : ''}</span><b class="nowrap">${rub(o.total)}</b></div>
+      ${S.brands.length > 1 ? `<div style="margin-top:6px">${brandPill(o.brand_name, o.brand_color)}</div>` : ''}</div>`
+  const paint = () => {
+    const box = $('#olist', v)
+    $$('#vmode button', v).forEach((b) => b.classList.toggle('on', b.dataset.m === mode))
+    $('#st', v).hidden = mode === 'kanban'
+    if (mode === 'kanban') {
+      box.innerHTML = `<p class="muted small" style="margin:0 0 10px">Перетащите карточку в другую колонку, чтобы сменить статус${matchMedia('(pointer: coarse)').matches ? ' (на телефоне — нажмите и подержите карточку)' : ''}.</p>
+        <div class="kanban" id="kb">${Object.entries(STATUS).map(([k, t]) => {
+          const list = rows.filter((o) => o.status === k)
+          const sum = list.reduce((s, o) => s + (o.total || 0), 0)
+          return `<div class="kcol" data-st="${k}"><div class="kcol-h"><span class="pill st-${k}">${t}</span><span class="muted small">${list.length}${k !== 'cancelled' && sum ? ' · ' + rub(sum) : ''}</span></div>
+            <div class="kcol-b">${list.slice(0, KANBAN_LIMIT).map(orderCard).join('') || '<div class="kempty">пусто</div>'}
+            ${list.length > KANBAN_LIMIT ? `<div class="kempty">ещё ${list.length - KANBAN_LIMIT} — смотрите списком</div>` : ''}</div></div>`
+        }).join('')}</div>`
+      kanbanDrag($('#kb', box), (orderId) => openOrder(orderId, draw), async (orderId, st) => {
+        const o = rows.find((x) => x.id === Number(orderId))
+        if (!o || o.status === st) return
+        const old = o.status
+        o.status = st; paint() // сразу двигаем, не дожидаясь сервера
+        try { await api('PATCH', `/orders/${o.id}`, { status: st }); toast(`№ ${o.number}: ${STATUS[st]}`); refreshCounters() }
+        catch (e) { o.status = old; paint(); toast(e.message, true) }
+      })
+      return
+    }
+    const list = status ? rows.filter((o) => o.status === status) : rows
+    box.innerHTML = list.length ? `<div class="table-wrap"><table>
       <thead><tr><th>№</th><th>Дата</th><th>Покупатель</th><th class="hide-m">Состав</th><th class="right">Сумма</th><th>Статус</th></tr></thead>
-      <tbody>${rows.map((o) => `<tr class="link" data-id="${o.id}">
+      <tbody>${list.map((o) => `<tr class="link" data-id="${o.id}">
         <td class="nowrap"><b>${esc(o.number)}</b> ${brandPill(o.brand_name, o.brand_color)}</td>
         <td class="nowrap muted">${dt(o.created_at)}</td>
         <td>${esc(o.name) || '—'}<div class="muted small nowrap">${phoneFmt(o.phone)}</div></td>
         <td class="hide-m muted">${num(o.items_count)} шт.${o.promo ? ` · <span class="pill">${esc(o.promo)}</span>` : ''}</td>
-        <td class="right nowrap"><b>${rub(o.total)}</b></td>
+        <td class="right nowrap"><b>${rub(o.total)}</b>${o.paid ? '<div class="small" style="color:var(--ok)">оплачен</div>' : ''}</td>
         <td><span class="pill st-${o.status}">${STATUS[o.status]}</span></td></tr>`).join('')}</tbody></table></div>`
       : `<div class="card empty"><b>Заказов нет</b>${status || qtext ? 'Попробуйте изменить фильтр' : 'Они появятся здесь сразу после оформления на сайте'}</div>`
     $$('tr.link', v).forEach((tr) => (tr.onclick = () => openOrder(tr.dataset.id, draw)))
+  }
+  const draw = guard(async () => {
+    rows = await api('GET', `/orders?${brandQ()}&q=${encodeURIComponent(qtext)}`)
+    paint()
   })
-  v.innerHTML = `<div class="head"><h1>Заказы</h1><div class="grow"></div><button class="btn primary" id="newOrder">+ Заказ по телефону</button></div>
+  v.innerHTML = `<div class="head"><h1>Заказы</h1><div class="tabs" id="vmode"><button data-m="list">☰ Список</button><button data-m="kanban">▦ Канбан</button></div>
+    <div class="grow"></div><button class="btn primary" id="newOrder">+ Заказ по телефону</button></div>
     <div class="head"><div class="tabs" id="st"><button class="on" data-s="">Все</button>${Object.entries(STATUS).map(([k, t]) => `<button data-s="${k}">${t}</button>`).join('')}</div>
     <input class="input" id="oq" placeholder="Номер, телефон или имя" style="flex:1;min-width:200px"></div><div id="olist"></div>`
-  $('#st', v).onclick = (e) => { if (e.target.dataset.s === undefined) return; status = e.target.dataset.s; $$('#st button', v).forEach((b) => b.classList.toggle('on', b === e.target)); draw() }
+  $('#vmode', v).onclick = (e) => { const m = e.target.closest('button')?.dataset.m; if (!m) return; mode = m; localStorage.setItem('crm-orders-view', mode); paint() }
+  $('#st', v).onclick = (e) => { if (e.target.dataset.s === undefined) return; status = e.target.dataset.s; $$('#st button', v).forEach((b) => b.classList.toggle('on', b === e.target)); paint() }
   let t; $('#oq', v).oninput = (e) => { clearTimeout(t); t = setTimeout(() => { qtext = e.target.value.trim(); draw() }, 250) }
   $('#newOrder', v).onclick = () => manualOrder(draw)
   draw()
   if (id) openOrder(id, draw)
-  return { onEvent: (e) => { if (e.type === 'order') draw() } }
+  return { onEvent: (e) => { if (e.type === 'order' && !document.querySelector('.kcard.dragging')) draw() } }
+}
+
+// Перетаскивание карточек: мышью — сразу, пальцем — после удержания 350 мс (иначе мешало бы прокрутке)
+function kanbanDrag(board, onOpen, onDrop) {
+  let drag = null
+  const colAt = (x, y) => document.elementFromPoint(x, y)?.closest('.kcol')
+  const clear = () => $$('.kcol.over', board).forEach((c) => c.classList.remove('over'))
+  const start = (st) => {
+    const r = st.card.getBoundingClientRect()
+    const ghost = st.card.cloneNode(true)
+    ghost.className = 'kcard kghost'
+    ghost.style.width = r.width + 'px'
+    document.body.append(ghost)
+    st.card.classList.add('dragging')
+    st.ghost = ghost; st.dx = st.x0 - r.left; st.dy = st.y0 - r.top; st.active = true
+    move(st.x0, st.y0)
+    if (navigator.vibrate) navigator.vibrate(15)
+  }
+  const move = (x, y) => {
+    drag.ghost.style.transform = `translate(${x - drag.dx}px, ${y - drag.dy}px) rotate(2deg)`
+    clear(); colAt(x, y)?.classList.add('over')
+    // автопрокрутка доски у краёв
+    const br = board.getBoundingClientRect()
+    if (x > br.right - 40) board.scrollLeft += 12; else if (x < br.left + 40) board.scrollLeft -= 12
+  }
+  const end = (x, y, cancelled) => {
+    const st = drag; drag = null
+    clearTimeout(st.timer)
+    removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp); removeEventListener('pointercancel', onCancel)
+    if (!st.active) { if (!cancelled && !st.moved) onOpen(st.card.dataset.id); return }
+    st.ghost.remove(); st.card.classList.remove('dragging'); clear()
+    const col = !cancelled && colAt(x, y)
+    if (col && col.dataset.st !== st.card.dataset.st) onDrop(st.card.dataset.id, col.dataset.st)
+  }
+  const onMove = (e) => {
+    if (!drag) return
+    const far = Math.abs(e.clientX - drag.x0) + Math.abs(e.clientY - drag.y0) > 6
+    if (!drag.active) {
+      if (far) { drag.moved = true; if (drag.touch) { clearTimeout(drag.timer); end(0, 0, true) } else start(drag) }
+      return
+    }
+    e.preventDefault(); move(e.clientX, e.clientY)
+  }
+  const onUp = (e) => drag && end(e.clientX, e.clientY, false)
+  const onCancel = () => drag && end(0, 0, true)
+  board.addEventListener('pointerdown', (e) => {
+    const card = e.target.closest('.kcard')
+    if (!card || e.button > 0) return
+    drag = { card, x0: e.clientX, y0: e.clientY, touch: e.pointerType !== 'mouse', active: false, moved: false }
+    if (drag.touch) drag.timer = setTimeout(() => drag && !drag.moved && start(drag), 350)
+    addEventListener('pointermove', onMove, { passive: false }); addEventListener('pointerup', onUp); addEventListener('pointercancel', onCancel)
+  })
+  board.addEventListener('touchmove', (e) => { if (drag?.active) e.preventDefault() }, { passive: false })
+  board.addEventListener('contextmenu', (e) => { if (e.target.closest('.kcard')) e.preventDefault() })
 }
 
 function modal(html) {
@@ -232,49 +331,94 @@ function modal(html) {
 
 const openOrder = guard(async (id, onChange) => {
   const o = await api('GET', `/orders/${id}`)
+  const editable = o.status === 'new'
+  const otherName = o.customer_id && o.customer_name && o.customer_name !== o.name
   const m = modal(`
-    <div class="head" style="margin-bottom:10px"><h2 style="margin:0">Заказ № ${esc(o.number)}</h2>${brandPill(o.brand_name, o.brand_color)}<div class="grow"></div><button class="btn sm" data-x>✕</button></div>
+    <div class="head" style="margin-bottom:10px"><h2 style="margin:0">Заказ № ${esc(o.number)}</h2>${brandPill(o.brand_name, o.brand_color)}${o.paid ? '<span class="pill st-delivered">оплачен</span>' : ''}<div class="grow"></div><button class="btn sm" data-x>✕</button></div>
     <p class="muted" style="margin:0 0 14px">${dt(o.created_at)}${o.utm_source ? ` · источник: ${esc(o.utm_source)}` : ''}</p>
     <label class="field"><span>Статус</span><select class="input" id="ost">${Object.entries(STATUS).map(([k, t]) => `<option value="${k}" ${k === o.status ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    <div id="obody"></div>
+    ${o.conversations.length ? `<p style="margin:0 0 14px">Переписки с покупателем: ${o.conversations.map((c) => `<a href="#/inbox/${c.id}" data-x>${SOURCE[c.source] || c.source}</a>`).join(', ')}</p>` : ''}
+    <label class="field"><span>Заметка для команды</span><textarea class="input" id="onote" rows="2" placeholder="Например: перезвонить после 18:00">${esc(o.note)}</textarea></label>
+    <div class="actions"><button class="btn primary" id="osave">Сохранить</button></div>
+    <h2 style="margin-top:16px">История</h2><div class="list-rows small">${o.history.map((h) => `<div class="r"><span>${esc(h.text)}${h.user_name ? ` <span class="muted">— ${esc(h.user_name)}</span>` : ''}</span><span class="muted nowrap">${dt(h.created_at)}</span></div>`).join('')}</div>`)
+  let editing = false
+  const view = () => `
     <dl class="kv" style="margin:0 0 14px">
-      <dt>Покупатель</dt><dd>${esc(o.name) || '—'}${o.customer_id ? ` · <a href="#/customers/${o.customer_id}" data-x>карточка</a>` : ''}</dd>
+      <dt>Покупатель</dt><dd>${esc(o.name) || '—'}${o.customer_id ? ` · <a href="#/customers/${o.customer_id}" data-x>карточка${otherName ? ` «${esc(o.customer_name)}»` : ''}</a>` : ''}
+        ${otherName ? `<div class="muted small">На этот номер уже есть покупатель «${esc(o.customer_name)}» — CRM объединяет заказы по телефону</div>` : ''}</dd>
       <dt>Телефон</dt><dd><a href="tel:+${esc(o.phone)}">${phoneFmt(o.phone)}</a></dd>
       ${o.delivery ? `<dt>Доставка</dt><dd>${esc(o.delivery)}</dd>` : ''}
       ${o.comment ? `<dt>Комментарий</dt><dd>${esc(o.comment)}</dd>` : ''}
       ${o.promo ? `<dt>Промокод</dt><dd>${esc(o.promo)} (−${rub(o.discount)})</dd>` : ''}
     </dl>
-    <div class="table-wrap" style="margin-bottom:14px"><table><tbody>
+    <div class="table-wrap" style="margin-bottom:${editable ? 8 : 14}px"><table><tbody>
       ${o.items.map((i) => `<tr><td>${esc(i.name)} <span class="muted">${esc(i.variant)}</span></td><td class="nowrap right">${i.qty} × ${rub(i.price)}</td></tr>`).join('')}
       ${o.discount ? `<tr><td class="muted">Скидка</td><td class="right">−${rub(o.discount)}</td></tr>` : ''}
       <tr><td><b>Итого</b></td><td class="right"><b>${rub(o.total)}</b></td></tr></tbody></table></div>
-    ${o.conversations.length ? `<p style="margin:0 0 14px">Переписки с покупателем: ${o.conversations.map((c) => `<a href="#/inbox/${c.id}" data-x>${SOURCE[c.source] || c.source}</a>`).join(', ')}</p>` : ''}
-    <label class="field"><span>Заметка для команды</span><textarea class="input" id="onote" rows="2" placeholder="Например: перезвонить после 18:00">${esc(o.note)}</textarea></label>
-    <div class="actions"><button class="btn primary" id="osave">Сохранить</button></div>
-    <h2 style="margin-top:16px">История</h2><div class="list-rows small">${o.history.map((h) => `<div class="r"><span>${esc(h.text)}${h.user_name ? ` <span class="muted">— ${esc(h.user_name)}</span>` : ''}</span><span class="muted nowrap">${dt(h.created_at)}</span></div>`).join('')}</div>`)
+    ${editable ? '<button class="btn sm" id="oedit" style="margin-bottom:14px">✎ Изменить заказ</button>' : '<p class="muted small" style="margin:-6px 0 14px">Состав можно менять, пока заказ в статусе «Новый».</p>'}`
+  const edit = () => `
+    <div class="grid g2" style="gap:8px"><label class="field"><span>Имя</span><input class="input" id="en" value="${esc(o.name)}"></label>
+      <label class="field"><span>Телефон</span><input class="input" id="ep" inputmode="tel" value="${esc(phoneFmt(o.phone))}"></label></div>
+    <label class="field"><span>Доставка / пункт выдачи</span><input class="input" id="ed" value="${esc(o.delivery)}"></label>
+    <div class="field"><span>Товары</span><div id="eitems"></div><button class="btn sm" id="eadd" type="button" style="justify-self:start">+ товар</button></div>
+    <div class="grid g2" style="gap:8px;align-items:end"><label class="field"><span>Скидка, ₽</span><input class="input" id="edisc" type="number" min="0" value="${o.discount || 0}"></label>
+      <div class="field"><span>Итого</span><b id="etotal" style="font-size:18px;line-height:38px"></b></div></div>
+    <div class="actions" style="margin:0 0 14px"><button class="btn" id="ecancel">Отмена</button><button class="btn primary" id="eok">Сохранить изменения</button></div>`
+  const itemRow = (i = {}) => `<div class="irow"><input class="input" placeholder="Товар" data-n value="${esc(i.name || '')}"><input class="input" placeholder="Фасовка" data-v value="${esc(i.variant || '')}">
+    <input class="input" type="number" min="1" value="${i.qty || 1}" data-q title="Количество"><input class="input" type="number" min="0" placeholder="Цена" value="${i.price ?? ''}" data-p title="Цена, ₽"><button class="btn sm" data-del title="Убрать">✕</button></div>`
+  const readItems = () => $$('#eitems .irow', m.el).map((r) => ({ id: r.dataset.pid || '', name: $('[data-n]', r).value.trim(), variant: $('[data-v]', r).value.trim(), qty: Number($('[data-q]', r).value) || 1, price: Number($('[data-p]', r).value) || 0 })).filter((i) => i.name)
+  const recalc = () => { const s = readItems().reduce((a, i) => a + i.qty * i.price, 0); $('#etotal', m.el).textContent = rub(Math.max(0, s - (Number($('#edisc', m.el).value) || 0))) }
+  const paint = () => {
+    $('#obody', m.el).innerHTML = editing ? edit() : view()
+    $$('#obody [data-x]', m.el).forEach((b) => b.addEventListener('click', m.close))
+    if (!editing) { const b = $('#oedit', m.el); if (b) b.onclick = () => { editing = true; paint() }; return }
+    $('#eitems', m.el).innerHTML = o.items.map(itemRow).join('')
+    $$('#eitems .irow', m.el).forEach((r, k) => (r.dataset.pid = o.items[k].product_id || ''))
+    $('#eadd', m.el).onclick = () => { $('#eitems', m.el).insertAdjacentHTML('beforeend', itemRow()); recalc() }
+    $('#eitems', m.el).oninput = recalc
+    $('#eitems', m.el).onclick = (e) => { if (e.target.dataset.del !== undefined) { e.target.closest('.irow').remove(); recalc() } }
+    $('#edisc', m.el).oninput = recalc
+    recalc()
+    $('#ecancel', m.el).onclick = () => { editing = false; paint() }
+    $('#eok', m.el).onclick = guard(async () => {
+      const items = readItems()
+      if (!items.length) throw new Error('Добавьте хотя бы один товар')
+      await api('PATCH', `/orders/${o.id}`, { items, discount: Number($('#edisc', m.el).value) || 0, contact: { name: $('#en', m.el).value, phone: $('#ep', m.el).value, delivery: $('#ed', m.el).value } })
+      toast('Заказ изменён'); m.close(); onChange?.(); openOrder(o.id, onChange)
+    })
+  }
+  paint()
   $$('[data-x]', m.el).forEach((b) => b.addEventListener('click', m.close))
   $('#osave', m.el).onclick = guard(async () => {
+    if (editing) throw new Error('Сначала сохраните или отмените изменения состава')
     await api('PATCH', `/orders/${o.id}`, { status: $('#ost', m.el).value, note: $('#onote', m.el).value })
     toast('Сохранено'); m.close(); onChange?.(); refreshCounters()
   })
 })
 
-function manualOrder(onDone) {
+// Новый заказ вручную (по телефону или из карточки покупателя)
+function manualOrder(onDone, preset = {}) {
   const brands = S.brands
-  const m = modal(`<h2>Заказ по телефону</h2>
-    <label class="field"><span>Марка</span><select class="input" id="mb">${brands.map((b) => `<option value="${b.id}" ${b.id === S.brand ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label>
-    <div class="grid g2"><label class="field"><span>Имя</span><input class="input" id="mn"></label><label class="field"><span>Телефон</span><input class="input" id="mp" inputmode="tel" placeholder="+7"></label></div>
+  const brandSel = preset.brandId || S.brand || brands[0]?.id
+  const m = modal(`<h2>${preset.title || 'Заказ по телефону'}</h2>
+    <label class="field"><span>Марка</span><select class="input" id="mb">${brands.map((b) => `<option value="${b.id}" ${b.id === brandSel ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label>
+    <div class="grid g2" style="gap:8px"><label class="field"><span>Имя</span><input class="input" id="mn" value="${esc(preset.name || '')}"></label><label class="field"><span>Телефон</span><input class="input" id="mp" inputmode="tel" placeholder="+7" value="${esc(preset.phone ? phoneFmt(preset.phone) : '')}"></label></div>
     <label class="field"><span>Доставка / пункт выдачи</span><input class="input" id="md"></label>
-    <div id="mitems"></div><button class="btn sm" id="madd" type="button">+ ещё товар</button>
+    <div class="field"><span>Товары</span><div id="mitems"></div><button class="btn sm" id="madd" type="button" style="justify-self:start">+ ещё товар</button></div>
     <div class="actions"><button class="btn" data-x>Отмена</button><button class="btn primary" id="mok">Создать заказ</button></div>`)
-  const addRow = () => $('#mitems', m.el).insertAdjacentHTML('beforeend', `<div class="grid" style="grid-template-columns:1fr 70px 100px;gap:8px;margin-bottom:8px">
-    <input class="input" placeholder="Товар и фасовка" data-n><input class="input" type="number" min="1" value="1" data-q><input class="input" type="number" min="0" placeholder="Цена, ₽" data-p></div>`)
+  const addRow = () => $('#mitems', m.el).insertAdjacentHTML('beforeend', `<div class="irow"><input class="input" placeholder="Товар" data-n><input class="input" placeholder="Фасовка" data-v>
+    <input class="input" type="number" min="1" value="1" data-q title="Количество"><input class="input" type="number" min="0" placeholder="Цена" data-p title="Цена, ₽"><button class="btn sm" data-del title="Убрать" type="button">✕</button></div>`)
   addRow()
   $('#madd', m.el).onclick = addRow
+  $('#mitems', m.el).onclick = (e) => { if (e.target.dataset.del !== undefined && $$('#mitems .irow', m.el).length > 1) e.target.closest('.irow').remove() }
   $('[data-x]', m.el).onclick = m.close
+  $(preset.phone ? '#mitems [data-n]' : '#mn', m.el).focus()
   $('#mok', m.el).onclick = guard(async () => {
-    const items = $$('#mitems > div', m.el).map((r) => ({ name: $('[data-n]', r).value.trim(), qty: Number($('[data-q]', r).value), price: Number($('[data-p]', r).value) })).filter((i) => i.name)
+    const items = $$('#mitems .irow', m.el).map((r) => ({ name: $('[data-n]', r).value.trim(), variant: $('[data-v]', r).value.trim(), qty: Number($('[data-q]', r).value) || 1, price: Number($('[data-p]', r).value) || 0 })).filter((i) => i.name)
+    if (!items.length) throw new Error('Добавьте хотя бы один товар')
     const r = await api('POST', '/orders', { brand_id: Number($('#mb', m.el).value), items, contact: { name: $('#mn', m.el).value, phone: $('#mp', m.el).value, delivery: $('#md', m.el).value } })
-    toast(`Заказ № ${r.number} создан`); m.close(); onDone?.()
+    toast(`Заказ № ${r.number} создан`); m.close(); onDone?.(r); refreshCounters()
   })
 }
 
@@ -299,10 +443,10 @@ function viewInbox(v, openId) {
   const loadList = guard(async () => {
     const st = filter.status === 'unread' ? 'open&unread=1' : filter.status
     convs = await api('GET', `/conversations?${brandQ()}&status=${st}&source=${filter.source}&q=${encodeURIComponent(filter.q)}`)
-    $('#citems', v).innerHTML = convs.length ? convs.map((c) => `<div class="conv ${c.id === cur ? 'on' : ''}" data-id="${c.id}">${ava(c)}
+    $('#citems', v).innerHTML = convs.length ? convs.map((c) => `<div class="conv ${c.id === cur ? 'on' : ''} ${c.unread ? 'unread' : ''}" data-id="${c.id}">${ava(c)}
       <div style="min-width:0"><div class="t">${esc(c.customer_name || c.title)}</div><div class="p">${esc(c.last_text)}</div>
       <div class="small"><span class="src-${c.source}">${SOURCE[c.source] || c.source}</span>${S.brands.length > 1 ? ` · <span class="muted">${esc(c.brand_name)}</span>` : ''}</div></div>
-      <div class="m"><span>${ago(c.last_message_at)}</span>${c.unread ? `<b class="badge">${c.unread}</b>` : ''}</div></div>`).join('')
+      <div class="m"><span>${ago(c.last_message_at)}</span>${c.unread ? `<b class="unread-dot" title="Непрочитанных: ${c.unread}">${c.unread > 99 ? '99+' : c.unread}</b>` : ''}</div></div>`).join('')
       : `<div class="empty"><b>Пусто</b>${filter.status === 'open' ? 'Новых переписок нет' : 'Ничего не найдено'}</div>`
     $$('.conv', v).forEach((el) => (el.onclick = () => { location.hash = `#/inbox/${el.dataset.id}` }))
   })
@@ -357,10 +501,12 @@ function viewInbox(v, openId) {
     aside.hidden = false
     $('#ib', v).classList.remove('noaside')
     aside.innerHTML = `<h2>Покупатель</h2>${c.customer_id ? `<dl class="kv"><dt>Имя</dt><dd>${esc(c.customer_name) || '—'}</dd><dt>Телефон</dt><dd>${phoneFmt(c.customer_phone) || '—'}</dd></dl>
-        <p><a href="#/customers/${c.customer_id}">Открыть карточку →</a></p>`
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"><a class="btn sm" href="#/customers/${c.customer_id}">Карточка →</a><button class="btn sm primary" id="aorder">+ Заказ</button></div>`
       : `<p class="muted small">Переписка пока не связана с покупателем. Если он назвал телефон — привяжите, и здесь появятся его заказы со всех сайтов.</p>
         <div style="display:flex;gap:6px"><input class="input" id="lphone" placeholder="+7…" inputmode="tel" style="flex:1"><button class="btn" id="link">Привязать</button></div>`}
       <h2 style="margin-top:18px">Заказы</h2>${c.orders.length ? `<div class="list-rows small">${c.orders.map((o) => `<div class="r"><a href="#/orders/${o.id}">№ ${esc(o.number)}</a><span class="nowrap">${rub(o.total)} <span class="pill st-${o.status}">${STATUS[o.status]}</span></span></div>`).join('')}</div>` : '<p class="muted small">Заказов нет</p>'}`
+    const ao = $('#aorder', aside)
+    if (ao) ao.onclick = () => manualOrder(() => loadChat(true), { brandId: c.brand_id, name: c.customer_name, phone: c.customer_phone, title: 'Новый заказ · ' + (c.customer_name || 'покупатель') })
     const lb = $('#link', aside)
     if (lb) lb.onclick = guard(async () => { await api('PATCH', `/conversations/${c.id}`, { phone: $('#lphone', aside).value }); toast('Привязано'); loadChat(true); loadList() })
   })
@@ -399,7 +545,11 @@ function viewCustomers(v, id) {
 const customerCard = guard(async (v, id) => {
   const c = await api('GET', `/customers/${id}`)
   const spent = c.orders.filter((o) => o.status !== 'cancelled').reduce((s, o) => s + o.total, 0)
-  v.innerHTML = `<div class="head"><a class="btn sm" href="#/customers">← Покупатели</a><h1>${esc(c.name) || 'Без имени'}</h1></div>
+  const prev = S.prevHash || ''
+  const back = /^#\/inbox\/\d+/.test(prev) ? ['← К переписке', prev] : /^#\/orders/.test(prev) ? ['← К заказам', prev] : /^#\/customers\/\d+/.test(prev) || !prev ? ['← Покупатели', '#/customers'] : /^#\/customers/.test(prev) ? ['← Покупатели', prev] : ['← Назад', prev]
+  const otherNames = [...new Set(c.orders.map((o) => (o.name || '').trim()).filter((n) => n && n.toLowerCase() !== (c.name || '').trim().toLowerCase()))]
+  v.innerHTML = `<div class="head"><a class="btn sm" href="${esc(back[1])}">${back[0]}</a><h1>${esc(c.name) || 'Без имени'}</h1><div class="grow"></div><button class="btn primary" id="cnew">+ Новый заказ</button></div>
+    ${otherNames.length ? `<div class="alert info" style="margin-bottom:14px">На этот телефон заказы оформляли и под другими именами: <b>${otherNames.map(esc).join(', ')}</b>. CRM объединяет покупателей по номеру телефона.</div>` : ''}
     <div class="grid g3">
       <div class="card"><h2>Контакты</h2>
         <label class="field"><span>Имя</span><input class="input" id="cn" value="${esc(c.name)}"></label>
@@ -414,7 +564,91 @@ const customerCard = guard(async (v, id) => {
         ${c.conversations.length ? c.conversations.map((x) => `<div class="r"><span><a href="#/inbox/${x.id}" class="src-${x.source}">${SOURCE[x.source]}</a> ${brandPill(x.brand_name, x.brand_color)}<div class="muted small">${esc(x.last_text).slice(0, 60)}</div></span><span class="muted small nowrap">${ago(x.last_message_at)}</span></div>`).join('') : '<p class="muted">Переписок нет</p>'}</div></div>
     </div>`
   $('#csave', v).onclick = guard(async () => { await api('PATCH', `/customers/${c.id}`, { name: $('#cn', v).value, email: $('#ce', v).value, note: $('#cnote', v).value }); toast('Сохранено') })
+  const lastBrand = c.orders[0]?.brand_id || c.conversations[0]?.brand_id
+  $('#cnew', v).onclick = () => manualOrder(() => customerCard(v, id), { brandId: lastBrand, name: c.name, phone: c.phone, title: 'Новый заказ · ' + (c.name || 'покупатель') })
+  $$('a[href^="#/orders/"]', v).forEach((a) => (a.onclick = (e) => { e.preventDefault(); openOrder(a.getAttribute('href').split('/')[2], () => customerCard(v, id)) }))
 })
+
+/* ====================== ПРОМОКОДЫ ====================== */
+const dayStart = (s) => (s ? new Date(s + 'T00:00:00').getTime() : null)
+const dayEnd = (s) => (s ? new Date(s + 'T23:59:59').getTime() : null)
+const isoDay = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+function promoState(p) {
+  const t = Date.now()
+  if (p.starts_at && t < p.starts_at) return ['ещё не начался', 'st-packed']
+  if (p.expires_at && t > p.expires_at) return ['истёк', 'st-cancelled']
+  if (p.max_uses && p.used >= p.max_uses) return ['исчерпан', 'st-cancelled']
+  if (p.expires_at && p.expires_at - t < 3 * 86400_000) return ['скоро истечёт', 'st-new']
+  return ['действует', 'st-delivered']
+}
+function viewPromos(v) {
+  const admin = S.me.role === 'admin'
+  let show = 'active'
+  const draw = guard(async () => {
+    const all = await api('GET', '/promos')
+    const list = all.filter((p) => (!S.brand || !p.brand_id || p.brand_id === S.brand) &&
+      (show === 'all' || (show === 'active') === ['действует', 'скоро истечёт', 'ещё не начался'].includes(promoState(p)[0])))
+    const brandName = (id) => { const b = brandOf(id); return b ? brandPill(b.name, b.color) : '<span class="pill">все сайты</span>' }
+    $('#plist', v).innerHTML = list.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Промокод</th><th>Скидка</th><th>Где действует</th><th>Срок</th><th class="right">Использован</th><th>Состояние</th>${admin ? '<th></th>' : ''}</tr></thead>
+      <tbody>${list.map((p) => { const [st, cls] = promoState(p); return `<tr>
+        <td><b class="mono">${esc(p.code)}</b>${p.note ? `<div class="muted small">${esc(p.note)}</div>` : ''}</td>
+        <td class="nowrap"><b>${p.kind === 'pct' ? p.value + '%' : rub(p.value)}</b>${p.first_order ? '<div class="muted small">только первый заказ</div>' : ''}</td>
+        <td>${brandName(p.brand_id)}</td>
+        <td class="small nowrap">${p.starts_at ? 'с ' + dd(p.starts_at) + '<br>' : ''}${p.expires_at ? 'до ' + dd(p.expires_at) : '<span class="muted">бессрочно</span>'}</td>
+        <td class="right nowrap">${num(p.used)}${p.max_uses ? ' из ' + num(p.max_uses) : ''}</td>
+        <td><span class="pill ${cls}">${st}</span></td>
+        ${admin ? `<td class="right"><button class="btn sm danger" data-dp="${p.id}" title="Удалить">Удалить</button></td>` : ''}</tr>` }).join('')}</tbody></table></div>`
+      : `<div class="card empty"><b>${show === 'active' ? 'Действующих промокодов нет' : 'Промокодов нет'}</b>${admin ? 'Нажмите «Новый промокод»' : ''}</div>`
+    $$('[data-dp]', v).forEach((b) => (b.onclick = guard(async () => {
+      const p = all.find((x) => x.id === Number(b.dataset.dp))
+      if (!confirm(`Удалить промокод ${p.code}? На сайте он сразу перестанет работать. Старые заказы с ним останутся.`)) return
+      await api('DELETE', `/promos/${p.id}`); toast(`Промокод ${p.code} удалён`); draw()
+    })))
+  })
+  v.innerHTML = `<div class="head"><h1>Промокоды</h1><div class="tabs" id="pshow"><button data-s="active" class="on">Действующие</button><button data-s="all">Все</button></div>
+    <div class="grow"></div>${admin ? '<button class="btn primary" id="pnew">+ Новый промокод</button>' : ''}</div>
+    <p class="muted small" style="margin-top:0">Промокод действует на выбранном сайте (или на всех сразу). Скидку считает CRM: если код истёк или не подходит, заказ придёт без скидки и с пометкой в истории.</p>
+    <div id="plist"></div>`
+  $('#pshow', v).onclick = (e) => { const s = e.target.dataset.s; if (!s) return; show = s; $$('#pshow button', v).forEach((b) => b.classList.toggle('on', b === e.target)); draw() }
+  if (admin) $('#pnew', v).onclick = () => promoForm(draw)
+  draw()
+}
+function promoForm(done) {
+  const today = isoDay(Date.now())
+  const m = modal(`<h2>Новый промокод</h2>
+    <label class="field"><span>Код</span><div style="display:flex;gap:6px"><input class="input mono" id="pc" placeholder="Например: ХВОСТИК10" style="flex:1;text-transform:uppercase" maxlength="30"><button class="btn" id="pgen" type="button" title="Придумать код">🎲</button></div></label>
+    <label class="field"><span>Где действует</span><select class="input" id="pb"><option value="">Все сайты</option>${S.brands.map((b) => `<option value="${b.id}" ${b.id === S.brand ? 'selected' : ''}>${esc(b.name)}${b.site_url ? ' — ' + esc(b.site_url.replace(/^https?:\/\//, '')) : ''}</option>`).join('')}</select></label>
+    <div class="grid g2" style="gap:8px"><label class="field"><span>Скидка</span><input class="input" id="pv" type="number" min="1" placeholder="10"></label>
+      <label class="field"><span>&nbsp;</span><select class="input" id="pk"><option value="pct">процентов</option><option value="fixed">рублей</option></select></label></div>
+    <div class="field"><span>Срок действия</span><div class="tabs" id="pdur">${[[7, 'неделя'], [30, 'месяц'], [90, '3 месяца'], [0, 'бессрочно'], ['c', 'свои даты']].map(([d, t]) => `<button type="button" data-d="${d}" class="${d === 30 ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+    <div class="grid g2" style="gap:8px" id="pdates"><label class="field"><span>Начало</span><input class="input" type="date" id="ps" value="${today}"></label>
+      <label class="field"><span>Последний день</span><input class="input" type="date" id="pe"></label></div>
+    <div class="grid g2" style="gap:8px"><label class="field"><span>Сколько раз можно применить</span><input class="input" id="pm" type="number" min="1" placeholder="без ограничений"></label>
+      <label class="small" style="display:flex;gap:6px;align-items:center;margin-top:18px"><input type="checkbox" id="pf"> только на первый заказ</label></div>
+    <label class="field"><span>Заметка (для себя)</span><input class="input" id="pn" placeholder="Например: для блогера, рассылка к 1 сентября"></label>
+    <div class="actions"><button class="btn" data-x>Отмена</button><button class="btn primary" id="pok">Создать</button></div>`)
+  const setDur = (d) => {
+    $$('#pdur button', m.el).forEach((b) => b.classList.toggle('on', b.dataset.d === String(d)))
+    if (d === 'c') return
+    const s = $('#ps', m.el).value || today
+    $('#pe', m.el).value = Number(d) ? isoDay(new Date(s + 'T12:00:00').getTime() + (Number(d) - 1) * 86400_000) : ''
+  }
+  setDur(30)
+  $('#pdur', m.el).onclick = (e) => { const d = e.target.dataset.d; if (d !== undefined) setDur(d === 'c' ? 'c' : Number(d)) }
+  $('#pe', m.el).oninput = () => setDur('c')
+  $('#pgen', m.el).onclick = () => { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; $('#pc', m.el).value = Array.from({ length: 8 }, () => a[Math.floor(Math.random() * a.length)]).join('') }
+  $('[data-x]', m.el).onclick = m.close
+  $('#pc', m.el).focus()
+  $('#pok', m.el).onclick = guard(async () => {
+    const s = $('#ps', m.el).value, e = $('#pe', m.el).value
+    const p = await api('POST', '/promos', {
+      code: $('#pc', m.el).value, brand_id: Number($('#pb', m.el).value) || null, kind: $('#pk', m.el).value, value: Number($('#pv', m.el).value),
+      starts_at: s && s !== today ? dayStart(s) : null, expires_at: dayEnd(e), max_uses: Number($('#pm', m.el).value) || null, first_order: $('#pf', m.el).checked, note: $('#pn', m.el).value,
+    })
+    toast(`Промокод ${p.code} создан`); m.close(); done()
+  })
+}
 
 /* ====================== НАСТРОЙКИ ====================== */
 function viewSettings(v) {

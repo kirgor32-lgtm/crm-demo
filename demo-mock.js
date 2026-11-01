@@ -83,6 +83,24 @@
     if (method === 'GET' && p === '/brands') return D.brands
     if (method === 'GET' && p === '/channels') return D.channels
     if (method === 'GET' && p === '/users') return D.users
+    if (method === 'GET' && p === '/promos') {
+      return D.promos.map(function (pr) {
+        return Object.assign({}, pr, { used: D.orders.filter(function (o) { return o.promo === pr.code && o.status !== 'cancelled' && (!pr.brand_id || o.brand_id === pr.brand_id) }).length })
+      })
+    }
+    if (method === 'POST' && p === '/promos') {
+      var code = String(b.code || '').trim().toUpperCase()
+      if (!/^[A-ZА-ЯЁ0-9_-]{3,30}$/.test(code)) throw new Err(400, 'Код — от 3 до 30 букв и цифр, без пробелов')
+      var val = Math.round(Number(b.value) || 0)
+      if (val < 1 || (b.kind !== 'fixed' && val > 90)) throw new Err(400, b.kind === 'fixed' ? 'Укажите сумму скидки в рублях' : 'Скидка — от 1 до 90%')
+      if (b.starts_at && b.expires_at && b.expires_at <= b.starts_at) throw new Err(400, 'Дата окончания должна быть позже даты начала')
+      if (D.promos.some(function (x) { return x.code === code && (x.brand_id || 0) === (b.brand_id || 0) })) throw new Err(400, 'Такой промокод уже есть')
+      var np = { id: D.nextId++, brand_id: b.brand_id || null, code: code, kind: b.kind === 'fixed' ? 'fixed' : 'pct', value: val, starts_at: b.starts_at || null, expires_at: b.expires_at || null,
+        first_order: b.first_order ? 1 : 0, max_uses: b.max_uses || null, note: b.note || '', created_at: now(), used: 0 }
+      D.promos.unshift(np)
+      return np
+    }
+    if ((m = p.match(/^\/promos\/(\d+)$/)) && method === 'DELETE') { D.promos = D.promos.filter(function (x) { return x.id !== Number(m[1]) }); return { ok: true } }
     if (method === 'GET' && p === '/analytics') return D.analytics[(s.get('days') || 30) + '|' + (brand || '')] || D.analytics['30|']
 
     if (method === 'GET' && p === '/orders') {
@@ -97,10 +115,22 @@
       if (!o) throw new Err(404, 'Заказ не найден')
       var det = D.orderDetails[o.id] || { items: [], history: [] }
       if (method === 'GET') {
-        return Object.assign({}, o, { items: det.items, history: det.history,
+        var cust = byId(D.customers, o.customer_id)
+        return Object.assign({}, o, { items: det.items, history: det.history, customer_name: cust ? cust.name : '',
           conversations: o.customer_id ? D.conversations.filter(function (c) { return c.customer_id === o.customer_id }) : [] })
       }
       if (method === 'PATCH') {
+        if (b.items !== undefined || b.contact !== undefined || b.discount !== undefined) {
+          if (o.status !== 'new') throw new Err(400, 'Менять состав можно только у заказа в статусе «Новый»')
+          var its = (b.items || det.items).filter(function (i) { return i.name })
+          if (!its.length) throw new Err(400, 'В заказе должен остаться хотя бы один товар')
+          det.items = its.map(function (i) { return { name: i.name, variant: i.variant || '', qty: Number(i.qty) || 1, price: Number(i.price) || 0 } })
+          var sum0 = det.items.reduce(function (s0, i) { return s0 + i.qty * i.price }, 0)
+          o.discount = Math.min(sum0, Math.max(0, Number(b.discount) || 0)); o.total = sum0 - o.discount
+          o.items_count = det.items.reduce(function (s0, i) { return s0 + i.qty }, 0)
+          if (b.contact) { o.name = b.contact.name; o.delivery = b.contact.delivery; var ph0 = String(b.contact.phone || '').replace(/\D/g, '').replace(/^8(?=\d{10}$)/, '7'); if (ph0.length === 11) o.phone = ph0 }
+          det.history.unshift({ id: D.nextId++, text: 'Изменено: состав и данные заказа', user_name: D.me.name, created_at: now() })
+        }
         if (b.status && b.status !== o.status) { det.history.unshift({ id: D.nextId++, text: 'Статус: ' + STATUS_RU[o.status] + ' → ' + STATUS_RU[b.status], user_name: D.me.name, created_at: now() }); o.status = b.status }
         if (b.note !== undefined && b.note !== o.note) { o.note = b.note; det.history.unshift({ id: D.nextId++, text: 'Изменена заметка', user_name: D.me.name, created_at: now() }) }
         o.updated_at = now()
@@ -117,7 +147,8 @@
       var total = items.reduce(function (sum, i) { return sum + (Number(i.price) || 0) * (Number(i.qty) || 1) }, 0)
       var c0 = b.contact || {}
       var no = { id: D.nextId++, number: 'Т' + String(now()).slice(-6), brand_id: br.id, brand_name: br.name, brand_color: br.color, status: 'new', total: total,
-        name: c0.name || '', phone: c0.phone || '', delivery: c0.delivery || '', items_count: items.reduce(function (sum, i) { return sum + (Number(i.qty) || 1) }, 0), created_at: now(), updated_at: now() }
+        customer_id: (function () { var ph1 = String(c0.phone || '').replace(/\D/g, '').replace(/^8(?=\d{10}$)/, '7'); var cu1 = D.customers.find(function (x) { return x.phone === ph1 }); return cu1 ? cu1.id : null })(),
+        name: c0.name || '', phone: String(c0.phone || '').replace(/\D/g, '').replace(/^8(?=\d{10}$)/, '7'), delivery: c0.delivery || '', items_count: items.reduce(function (sum, i) { return sum + (Number(i.qty) || 1) }, 0), created_at: now(), updated_at: now() }
       D.orders.unshift(no)
       D.orderDetails[no.id] = { items: items, history: [{ id: D.nextId++, text: 'Заказ создан вручную', user_name: D.me.name, created_at: now() }] }
       emit({ type: 'order', orderId: no.id, brandId: br.id })
