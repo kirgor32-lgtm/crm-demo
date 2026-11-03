@@ -337,6 +337,7 @@ const openOrder = guard(async (id, onChange) => {
     <div class="head" style="margin-bottom:10px"><h2 style="margin:0">Заказ № ${esc(o.number)}</h2>${brandPill(o.brand_name, o.brand_color)}${o.paid ? '<span class="pill st-delivered">оплачен</span>' : ''}<div class="grow"></div><button class="btn sm" data-x>✕</button></div>
     <p class="muted" style="margin:0 0 14px">${dt(o.created_at)}${o.utm_source ? ` · источник: ${esc(o.utm_source)}` : ''}</p>
     <label class="field"><span>Статус</span><select class="input" id="ost">${Object.entries(STATUS).map(([k, t]) => `<option value="${k}" ${k === o.status ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    <label class="small" style="display:flex;gap:6px;margin:-4px 0 14px"><input type="checkbox" id="opaid" ${o.paid ? 'checked' : ''}> Оплачен <span class="muted">— отмечайте, когда деньги пришли (проверьте в платёжной системе)</span></label>
     <div id="obody"></div>
     ${o.conversations.length ? `<p style="margin:0 0 14px">Переписки с покупателем: ${o.conversations.map((c) => `<a href="#/inbox/${c.id}" data-x>${SOURCE[c.source] || c.source}</a>`).join(', ')}</p>` : ''}
     <label class="field"><span>Заметка для команды</span><textarea class="input" id="onote" rows="2" placeholder="Например: перезвонить после 18:00">${esc(o.note)}</textarea></label>
@@ -392,7 +393,7 @@ const openOrder = guard(async (id, onChange) => {
   $$('[data-x]', m.el).forEach((b) => b.addEventListener('click', m.close))
   $('#osave', m.el).onclick = guard(async () => {
     if (editing) throw new Error('Сначала сохраните или отмените изменения состава')
-    await api('PATCH', `/orders/${o.id}`, { status: $('#ost', m.el).value, note: $('#onote', m.el).value })
+    await api('PATCH', `/orders/${o.id}`, { status: $('#ost', m.el).value, note: $('#onote', m.el).value, paid: $('#opaid', m.el).checked })
     toast('Сохранено'); m.close(); onChange?.(); refreshCounters()
   })
 })
@@ -598,8 +599,9 @@ function viewPromos(v) {
         <td class="small nowrap">${p.starts_at ? 'с ' + dd(p.starts_at) + '<br>' : ''}${p.expires_at ? 'до ' + dd(p.expires_at) : '<span class="muted">бессрочно</span>'}</td>
         <td class="right nowrap">${num(p.used)}${p.max_uses ? ' из ' + num(p.max_uses) : ''}</td>
         <td><span class="pill ${cls}">${st}</span></td>
-        ${admin ? `<td class="right"><button class="btn sm danger" data-dp="${p.id}" title="Удалить">Удалить</button></td>` : ''}</tr>` }).join('')}</tbody></table></div>`
+        ${admin ? `<td class="right nowrap"><button class="btn sm" data-ep="${p.id}">Изменить</button> <button class="btn sm danger" data-dp="${p.id}" title="Удалить">Удалить</button></td>` : ''}</tr>` }).join('')}</tbody></table></div>`
       : `<div class="card empty"><b>${show === 'active' ? 'Действующих промокодов нет' : 'Промокодов нет'}</b>${admin ? 'Нажмите «Новый промокод»' : ''}</div>`
+    $$('[data-ep]', v).forEach((b) => (b.onclick = () => promoForm(draw, all.find((x) => x.id === Number(b.dataset.ep)))))
     $$('[data-dp]', v).forEach((b) => (b.onclick = guard(async () => {
       const p = all.find((x) => x.id === Number(b.dataset.dp))
       if (!confirm(`Удалить промокод ${p.code}? На сайте он сразу перестанет работать. Старые заказы с ним останутся.`)) return
@@ -614,39 +616,48 @@ function viewPromos(v) {
   if (admin) $('#pnew', v).onclick = () => promoForm(draw)
   draw()
 }
-function promoForm(done) {
+function promoForm(done, p = null) {
   const today = isoDay(Date.now())
-  const m = modal(`<h2>Новый промокод</h2>
-    <label class="field"><span>Код</span><div style="display:flex;gap:6px"><input class="input mono" id="pc" placeholder="Например: ХВОСТИК10" style="flex:1;text-transform:uppercase" maxlength="30"><button class="btn" id="pgen" type="button" title="Придумать код">🎲</button></div></label>
-    <label class="field"><span>Где действует</span><select class="input" id="pb"><option value="">Все сайты</option>${S.brands.map((b) => `<option value="${b.id}" ${b.id === S.brand ? 'selected' : ''}>${esc(b.name)}${b.site_url ? ' — ' + esc(b.site_url.replace(/^https?:\/\//, '')) : ''}</option>`).join('')}</select></label>
-    <div class="grid g2" style="gap:8px"><label class="field"><span>Скидка</span><input class="input" id="pv" type="number" min="1" placeholder="10"></label>
-      <label class="field"><span>&nbsp;</span><select class="input" id="pk"><option value="pct">процентов</option><option value="fixed">рублей</option></select></label></div>
-    <div class="field"><span>Срок действия</span><div class="tabs" id="pdur">${[[7, 'неделя'], [30, 'месяц'], [90, '3 месяца'], [0, 'бессрочно'], ['c', 'свои даты']].map(([d, t]) => `<button type="button" data-d="${d}" class="${d === 30 ? 'on' : ''}">${t}</button>`).join('')}</div></div>
-    <div class="grid g2" style="gap:8px" id="pdates"><label class="field"><span>Начало</span><input class="input" type="date" id="ps" value="${today}"></label>
-      <label class="field"><span>Последний день</span><input class="input" type="date" id="pe"></label></div>
-    <div class="grid g2" style="gap:8px"><label class="field"><span>Сколько раз можно применить</span><input class="input" id="pm" type="number" min="1" placeholder="без ограничений"></label>
-      <label class="small" style="display:flex;gap:6px;align-items:center;margin-top:18px"><input type="checkbox" id="pf"> только на первый заказ</label></div>
-    <label class="field"><span>Заметка (для себя)</span><input class="input" id="pn" placeholder="Например: для блогера, рассылка к 1 сентября"></label>
-    <div class="actions"><button class="btn" data-x>Отмена</button><button class="btn primary" id="pok">Создать</button></div>`)
+  const locked = !!(p && p.used) // уже применяли — название и сайт не меняем, чтобы не потерять статистику
+  const brandSel = p ? p.brand_id : S.brand
+  const m = modal(`<h2>${p ? 'Промокод ' + esc(p.code) : 'Новый промокод'}</h2>
+    ${locked ? `<div class="alert info" style="margin-bottom:12px">Промокод уже применили ${num(p.used)} раз — название и сайт не меняются, чтобы не потерялась статистика. Скидку, срок, лимит и условия менять можно: новые условия действуют для следующих заказов.</div>` : ''}
+    <label class="field"><span>Код</span><div style="display:flex;gap:6px"><input class="input mono" id="pc" placeholder="Например: ХВОСТИК10" style="flex:1;text-transform:uppercase" maxlength="30" value="${esc(p?.code || '')}" ${locked ? 'disabled' : ''}>${locked ? '' : '<button class="btn" id="pgen" type="button" title="Придумать код">🎲</button>'}</div></label>
+    <label class="field"><span>Где действует</span><select class="input" id="pb" ${locked ? 'disabled' : ''}><option value="">Все сайты</option>${S.brands.map((b) => `<option value="${b.id}" ${b.id === brandSel ? 'selected' : ''}>${esc(b.name)}${b.site_url ? ' — ' + esc(b.site_url.replace(/^https?:\/\//, '')) : ''}</option>`).join('')}</select></label>
+    <div class="grid g2" style="gap:8px"><label class="field"><span>Скидка</span><input class="input" id="pv" type="number" min="1" placeholder="10" value="${p ? p.value : ''}"></label>
+      <label class="field"><span>&nbsp;</span><select class="input" id="pk"><option value="pct">процентов</option><option value="fixed" ${p?.kind === 'fixed' ? 'selected' : ''}>рублей</option></select></label></div>
+    <div class="field"><span>Срок действия</span><div class="tabs" id="pdur">${[[7, 'неделя'], [30, 'месяц'], [90, '3 месяца'], [0, 'бессрочно'], ['c', 'свои даты']].map(([d, t]) => `<button type="button" data-d="${d}">${t}</button>`).join('')}</div></div>
+    <div class="grid g2" style="gap:8px" id="pdates"><label class="field"><span>Начало</span><input class="input" type="date" id="ps" value="${p?.starts_at ? isoDay(p.starts_at) : today}"></label>
+      <label class="field"><span>Последний день</span><input class="input" type="date" id="pe" value="${p?.expires_at ? isoDay(p.expires_at) : ''}"></label></div>
+    <div class="grid g2" style="gap:8px"><label class="field"><span>Сколько раз можно применить</span><input class="input" id="pm" type="number" min="1" placeholder="без ограничений" value="${p?.max_uses || ''}"></label>
+      <label class="small" style="display:flex;gap:6px;align-items:center;margin-top:18px"><input type="checkbox" id="pf" ${p?.first_order ? 'checked' : ''}> только на первый заказ</label></div>
+    <label class="field"><span>Заметка (для себя)</span><input class="input" id="pn" placeholder="Например: для блогера, рассылка к 1 сентября" value="${esc(p?.note || '')}"></label>
+    <div class="actions"><button class="btn" data-x>Отмена</button><button class="btn primary" id="pok">${p ? 'Сохранить' : 'Создать'}</button></div>`)
   const setDur = (d) => {
     $$('#pdur button', m.el).forEach((b) => b.classList.toggle('on', b.dataset.d === String(d)))
     if (d === 'c') return
     const s = $('#ps', m.el).value || today
     $('#pe', m.el).value = Number(d) ? isoDay(new Date(s + 'T12:00:00').getTime() + (Number(d) - 1) * 86400_000) : ''
   }
-  setDur(30)
+  if (!p) setDur(30)
+  else $$('#pdur button', m.el).forEach((b) => b.classList.toggle('on', b.dataset.d === (p.expires_at ? 'c' : '0'))) // при редактировании — даты как есть
   $('#pdur', m.el).onclick = (e) => { const d = e.target.dataset.d; if (d !== undefined) setDur(d === 'c' ? 'c' : Number(d)) }
   $('#pe', m.el).oninput = () => setDur('c')
-  $('#pgen', m.el).onclick = () => { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; $('#pc', m.el).value = Array.from({ length: 8 }, () => a[Math.floor(Math.random() * a.length)]).join('') }
+  const gen = $('#pgen', m.el)
+  if (gen) gen.onclick = () => { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; $('#pc', m.el).value = Array.from({ length: 8 }, () => a[Math.floor(Math.random() * a.length)]).join('') }
   $('[data-x]', m.el).onclick = m.close
-  $('#pc', m.el).focus()
+  $(locked ? '#pv' : '#pc', m.el).focus()
   $('#pok', m.el).onclick = guard(async () => {
     const s = $('#ps', m.el).value, e = $('#pe', m.el).value
-    const p = await api('POST', '/promos', {
+    // начало «сегодня» = действует сразу; у старого промокода сохраняем прежнюю дату начала, если её не трогали
+    const keepStart = p?.starts_at && s === isoDay(p.starts_at)
+    const body = {
       code: $('#pc', m.el).value, brand_id: Number($('#pb', m.el).value) || null, kind: $('#pk', m.el).value, value: Number($('#pv', m.el).value),
-      starts_at: s && s !== today ? dayStart(s) : null, expires_at: dayEnd(e), max_uses: Number($('#pm', m.el).value) || null, first_order: $('#pf', m.el).checked, note: $('#pn', m.el).value,
-    })
-    toast(`Промокод ${p.code} создан`); m.close(); done()
+      starts_at: keepStart ? p.starts_at : s && s !== today ? dayStart(s) : null, expires_at: p?.expires_at && e === isoDay(p.expires_at) ? p.expires_at : dayEnd(e),
+      max_uses: Number($('#pm', m.el).value) || null, first_order: $('#pf', m.el).checked, note: $('#pn', m.el).value,
+    }
+    const r = p ? await api('PATCH', `/promos/${p.id}`, body) : await api('POST', '/promos', body)
+    toast(p ? `Промокод ${r.code} сохранён` : `Промокод ${r.code} создан`); m.close(); done()
   })
 }
 
@@ -671,7 +682,10 @@ crm.track('checkout_start')
 crm.order({ number, items: [{ id, name, w, qty, price }], contact: { name, phone, delivery }, discount, promo })
 crm.lead({ name, phone, topic, msg })</pre>
           <p class="small muted">Ключ сайта: <code>${esc(b.api_key)}</code> · Заказы принимаются только с адреса ${esc(b.site_url) || '(любого — укажите адрес сайта!)'}</p>
-        </details></div>`).join('')}</div>` : ''}
+        </details>
+        <div class="head small" style="margin:8px 0 0;gap:8px;flex-wrap:wrap"><span><b>Прайс:</b> ${b.prices_at ? `обновлён ${dt(b.prices_at)}` : '<span style="color:var(--danger,#d33)">не загружен — цены заказов не сверяются</span>'}</span>
+          ${b.prices_error ? `<span class="muted">${esc(b.prices_error)}</span>` : ''}<div class="grow"></div><button class="btn sm" data-ps="${b.id}">Обновить с сайта</button></div>
+        <p class="muted small" style="margin:4px 0 0">CRM берёт цены заказов с сайта из прайса, а не из браузера покупателя. Прайс обновляется сам каждый час.</p></div>`).join('')}</div>` : ''}
 
     <div class="card" style="margin-bottom:14px"><div class="head" style="margin-bottom:8px"><h2 style="margin:0">Мессенджеры</h2><div class="grow"></div>${admin ? '<button class="btn sm" id="addCh">+ Подключить бота</button>' : ''}</div>
       <p class="muted small" style="margin-top:0">CRM получает сообщения, которые покупатели пишут <b>боту</b> марки, и отвечает от его имени. Ссылка «Написать в Telegram/MAX» на сайте должна вести на этого бота.</p>
@@ -702,6 +716,7 @@ crm.lead({ name, phone, topic, msg })</pre>
     if (admin) {
       $('#addBrand', v).onclick = () => brandForm(null, draw)
       $$('[data-eb]', v).forEach((b) => (b.onclick = () => brandForm(brands.find((x) => x.id === Number(b.dataset.eb)), draw)))
+      $$('[data-ps]', v).forEach((b) => (b.onclick = guard(async () => { const r = await api('POST', `/brands/${b.dataset.ps}/prices/sync`); toast(`Прайс обновлён: ${r.n} позиций`); draw() })))
       $('#addCh', v).onclick = () => channelForm(null, brands, draw)
       $$('[data-ec]', v).forEach((b) => (b.onclick = () => channelForm(chans.find((x) => x.id === Number(b.dataset.ec)), brands, draw)))
       $('#addUser', v).onclick = () => userForm(draw)
@@ -717,12 +732,13 @@ function brandForm(b, done) {
   const m = modal(`<h2>${b ? 'Марка' : 'Новая марка'}</h2>
     <label class="field"><span>Название</span><input class="input" id="bn" value="${esc(b?.name || '')}" placeholder="Например: Хвостик"></label>
     <label class="field"><span>Адрес сайта</span><input class="input" id="bu" value="${esc(b?.site_url || '')}" placeholder="https://…"><span class="muted small" style="font-weight:400">Заказы будут приниматься только с этого сайта</span></label>
+    <label class="field"><span>Адрес прайса</span><input class="input" id="bpu" value="${esc(b?.prices_url || '')}" placeholder="по умолчанию: адрес сайта + /prices.json"><span class="muted small" style="font-weight:400">Файл с ценами, который публикует сайт. По нему CRM проверяет цены в заказах</span></label>
     <label class="field"><span>Цвет метки</span><input type="color" id="bc" value="${esc(b?.color || '#0ea5e9')}" style="width:60px;height:36px;border:0;background:none"></label>
     ${b ? '<label class="small" style="display:flex;gap:6px"><input type="checkbox" id="brk"> выпустить новый ключ сайта (старый перестанет работать)</label>' : ''}
     <div class="actions"><button class="btn" data-x>Отмена</button><button class="btn primary" id="bok">Сохранить</button></div>`)
   $('[data-x]', m.el).onclick = m.close
   $('#bok', m.el).onclick = guard(async () => {
-    const body = { name: $('#bn', m.el).value, site_url: $('#bu', m.el).value.trim(), color: $('#bc', m.el).value, rotateKey: $('#brk', m.el)?.checked }
+    const body = { name: $('#bn', m.el).value, site_url: $('#bu', m.el).value.trim(), prices_url: $('#bpu', m.el).value.trim(), color: $('#bc', m.el).value, rotateKey: $('#brk', m.el)?.checked }
     if (b) await api('PATCH', `/brands/${b.id}`, body); else await api('POST', '/brands', body)
     S.brands = await api('GET', '/brands'); renderShell(); paintCounters(); route(); m.close()
   })

@@ -81,6 +81,8 @@
     if (method === 'POST' && p === '/me/password') throw new Err(400, DENY)
     if (method === 'GET' && p === '/counters') return counters()
     if (method === 'GET' && p === '/brands') return D.brands
+    if (method === 'POST' && /^\/brands\/\d+\/prices\/sync$/.test(p)) throw new Err(400, DENY)
+    if (method === 'GET' && /^\/brands\/\d+\/prices$/.test(p)) return []
     if (method === 'GET' && p === '/channels') return D.channels
     if (method === 'GET' && p === '/users') return D.users
     if (method === 'GET' && p === '/promos') {
@@ -99,6 +101,21 @@
         first_order: b.first_order ? 1 : 0, max_uses: b.max_uses || null, note: b.note || '', created_at: now(), used: 0 }
       D.promos.unshift(np)
       return np
+    }
+    if ((m = p.match(/^\/promos\/(\d+)$/)) && method === 'PATCH') {
+      var ep = D.promos.find(function (x) { return x.id === Number(m[1]) })
+      if (!ep) throw new Err(404, 'Промокод не найден')
+      var ecode = String(b.code || ep.code).trim().toUpperCase(), ebrand = b.brand_id === undefined ? ep.brand_id : (b.brand_id || null)
+      var eused = D.orders.filter(function (o) { return o.promo === ep.code && o.status !== 'cancelled' }).length
+      if ((ecode !== ep.code || ebrand !== ep.brand_id) && eused) throw new Err(400, 'Промокод ' + ep.code + ' уже применяли — название и сайт не изменить')
+      if (!/^[A-ZА-ЯЁ0-9_-]{3,30}$/.test(ecode)) throw new Err(400, 'Код — от 3 до 30 букв и цифр, без пробелов')
+      var ev = Math.round(Number(b.value) || 0)
+      if (ev < 1 || (b.kind !== 'fixed' && ev > 90)) throw new Err(400, b.kind === 'fixed' ? 'Укажите сумму скидки в рублях' : 'Скидка — от 1 до 90%')
+      if (b.starts_at && b.expires_at && b.expires_at <= b.starts_at) throw new Err(400, 'Дата окончания должна быть позже даты начала')
+      if (D.promos.some(function (x) { return x !== ep && x.code === ecode && (x.brand_id || 0) === (ebrand || 0) })) throw new Err(400, 'Такой промокод уже есть')
+      Object.assign(ep, { code: ecode, brand_id: ebrand, kind: b.kind === 'fixed' ? 'fixed' : 'pct', value: ev, starts_at: b.starts_at || null, expires_at: b.expires_at || null,
+        first_order: b.first_order ? 1 : 0, max_uses: b.max_uses || null, note: b.note || '' })
+      return Object.assign({}, ep, { used: eused })
     }
     if ((m = p.match(/^\/promos\/(\d+)$/)) && method === 'DELETE') { D.promos = D.promos.filter(function (x) { return x.id !== Number(m[1]) }); return { ok: true } }
     if (method === 'GET' && p === '/analytics') return D.analytics[(s.get('days') || 30) + '|' + (brand || '')] || D.analytics['30|']
@@ -130,6 +147,11 @@
           o.items_count = det.items.reduce(function (s0, i) { return s0 + i.qty }, 0)
           if (b.contact) { o.name = b.contact.name; o.delivery = b.contact.delivery; var ph0 = String(b.contact.phone || '').replace(/\D/g, '').replace(/^8(?=\d{10}$)/, '7'); if (ph0.length === 11) o.phone = ph0 }
           det.history.unshift({ id: D.nextId++, text: 'Изменено: состав и данные заказа', user_name: D.me.name, created_at: now() })
+        }
+        if (b.paid !== undefined && !!b.paid !== !!o.paid) {
+          o.paid = b.paid ? 1 : 0
+          det.history.unshift({ id: D.nextId++, text: b.paid ? 'Отмечен как оплаченный' : 'Снята отметка об оплате', user_name: D.me.name, created_at: now() })
+          if (b.paid && o.status === 'new' && (!b.status || b.status === 'new')) b.status = 'confirmed'
         }
         if (b.status && b.status !== o.status) { det.history.unshift({ id: D.nextId++, text: 'Статус: ' + STATUS_RU[o.status] + ' → ' + STATUS_RU[b.status], user_name: D.me.name, created_at: now() }); o.status = b.status }
         if (b.note !== undefined && b.note !== o.note) { o.note = b.note; det.history.unshift({ id: D.nextId++, text: 'Изменена заметка', user_name: D.me.name, created_at: now() }) }
